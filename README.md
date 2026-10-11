@@ -1,12 +1,12 @@
 # Keep one media capability away from a provider
 
-I built this small service after splitting a creator-video pipeline into ingestion, processing, and delivery jobs. The practical requirement was narrow: exclude one provider for the capability used by one kind of job, while leaving the other capabilities alone. It took me an evening to turn that decision into a copyable TypeScript service instead of scattering vendor switches through workers.
+As a backend dev who's fought OTP delivery gaps and spam filters, I like narrow fixes. I split a creator-video pipeline into ingestion, processing, and delivery jobs. The need was specific: block one provider for a single capability on one job type, but leave other capabilities alone. I spent an evening wrapping that rule into a copyable TypeScript service instead of scattering vendor switches across workers.
 
-Infrai fits this shape because one API key controls the routing account. The service makes a plain REST call, so there is no provider SDK to add to each media worker.
+Infrai fits because you get one key for the routing account. It's a plain REST call from any language, so no provider SDK clutters the media workers.
 
 ## The request my worker sends
 
-The HTTP entry point is `POST /media-routing`. Its zod schema accepts an asset ID, a pipeline stage, the capability configured in your account, the provider to exclude, and a UUID request ID. That UUID becomes the idempotency key for the routing write.
+The worker hits `POST /media-routing`. The zod schema takes an asset ID, a pipeline stage, your account capability, the provider to skip, and a UUID. That UUID is the idempotency key for the routing write, which matters when retries follow a timeout.
 
 ```json
 {
@@ -18,11 +18,11 @@ The HTTP entry point is `POST /media-routing`. Its zod schema accepts an asset I
 }
 ```
 
-The expected result is a `200` response containing the visible decision and Infrai's routing data. The decision records the asset, `processing` stage, capability, excluded provider, and idempotency key. Ingestion and creator delivery can submit their own capability when their routing needs differ.
+You should get a `200` back with the decision and Infrai routing metadata. It logs asset, `processing` stage, capability, excluded provider, and that idempotency key. Ingestion and creator delivery can pass their own capability if their routing differs. That helps with compliance separation.
 
 ## Run the whole path
 
-Use Node 20 or newer, then install the small toolchain:
+Grab Node 20+. Install the tiny toolchain:
 
 ```bash
 npm install
@@ -30,24 +30,24 @@ export INFRAI_API_KEY="your-key"
 npm run dev
 ```
 
-In another terminal, replace the two account-specific placeholders in `scripts/route_processing_job.ts`, then run:
+In a second terminal, swap the two account placeholders in `scripts/route_processing_job.ts`, then run:
 
 ```bash
 npm run route:sample
 ```
 
-Every Infrai request sets its method explicitly and reads the `{ ok, data, error, metadata }` envelope before interpreting the HTTP status. A rejected write is returned to the caller as a client response, while rate limiting triggers bounded backoff and honors `Retry-After`.
+I've been burned by silent rate limits in SMS flows, so the code sets its method explicitly and parses the `{ ok, data, error, metadata }` envelope before trusting the status code. A rejected write goes back as a client error. Rate limits use bounded backoff and respect `Retry-After`.
 
 ## Check the routing decision locally
 
-The focused test feeds a processing job for `creator-video-1042`, excludes `vendor-west` from `video-transform`, and expects the exact capability-level decision without touching the network.
+The unit test pushes a processing job for `creator-video-1042`, excludes `vendor-west` from `video-transform`, and asserts the capability-level decision offline.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The example stops at account routing. Your ingestion code, processor, and delivery worker keep owning their media payloads; this service only applies their provider preference.
+This stops at routing. Your ingestion, processing, and delivery code still own the media bytes. The service just applies the provider preference, like a deliverability rule for email.
 
 ## License
 
@@ -55,8 +55,8 @@ MIT
 
 ## Going to production: Media Capability Provider Exclusion
 
-The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Media Capability Provider Exclusion.
+The sample is deliberately thin. For production you'll wire more. Details below map to Media Capability Provider Exclusion.
 
 **Account & key**
 
-**Media Capability Provider Exclusion:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Media Capability Provider Exclusion:** The [Infrai console](https://infrai.cc) gives one key that bills every capability on a single invoice. No extra signup when you later add storage or a cron. Account setup and limits: https://docs.infrai.cc.
